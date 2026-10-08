@@ -1,4 +1,4 @@
-name: Build paradigm kernel
+name: Build paradigm kernel with ZYDARK & KernelSU
 
 on:
   workflow_dispatch:
@@ -17,33 +17,46 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout repository with submodules (shallow clone)
+      # 1. Checkout repository with submodules
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 1
 
       - name: Install build tools
         run: |
+          sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            git \
-            curl \
-            unzip \
-            wget \
-            zip \
-            zstd
+            bc bison flex libssl-dev libncurses5-dev libncurses-dev \
+            git curl unzip wget zip zstd libelf-dev
 
       - name: Download prebuilt Google clang
         run: |
           wget -O llvm.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r596125.tar.gz
-          mkdir llvm-22; cd llvm-22
+          mkdir -p llvm-22; cd llvm-22
           tar -xf ../llvm.tar.gz
           rm ../llvm.tar.gz
           cd ..
 
-      # 2. Run your custom bash script
+      # 2. دمج KernelSU v0.9.5 وتخصيص الاسم ZYDARK
+      - name: Inject KernelSU & Custom Configuration
+        run: |
+          # تنزيل ودمج KernelSU v0.9.5
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          
+          # البحث عن ملفات defconfig وتعديلها لإضافة ZYDARK وإعدادات الروت
+          find arch/arm64/configs/ -name "*defconfig" | xargs -I {} sh -c '
+            echo "CONFIG_KSU=y" >> {}
+            echo "CONFIG_KALLSYMS=y" >> {}
+            echo "CONFIG_KALLSYMS_ALL=y" >> {}
+            echo "CONFIG_OVERLAY_FS=y" >> {}
+            echo "CONFIG_NAMESPACES=y" >> {}
+            echo "CONFIG_LOCALVERSION=\"-ZYDARK-KSU\"" >> {}
+          '
+
+      # 3. تشغيل سكريبت البناء الخاص بك
       - name: Build kernel
         run: |
           chmod +x build.sh
@@ -54,10 +67,10 @@ jobs:
         run: |
           echo "RELEASE_TS=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
           : > version.txt
-          echo "**Kernel version:** $(cat out/include/config/kernel.release)  " >> version.txt
+          echo "**Kernel version:** $(cat out/include/config/kernel.release 2>/dev/null || echo 'ZYDARK-KSU')" >> version.txt
           echo >> version.txt
           export KHASH="$(git rev-parse HEAD)"
-          echo "**Kernel source:** [$KHASH](https://github.com/UN1CA/kernel_samsung_sm7150/tree/$KHASH)" >> version.txt
+          echo "**Kernel source:** [$KHASH](https://github.com/${{ github.repository }}/tree/$KHASH)" >> version.txt
 
           if [ "${{ github.event.inputs.release }}" = "true" ] && \
              [ -n "${{ github.event.inputs.changelog }}" ]; then
@@ -67,16 +80,26 @@ jobs:
             printf "%b\n" "${{ github.event.inputs.changelog }}" >> version.txt
           fi
 
-      # 3. Upload the generated boot.img
+      # 4. رفع الملفات كـ Artifacts تلقائياً في كل مرة
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ParadigmKernel-ZYDARK-KSU
+          path: |
+            boot.img
+            dtbo.img
+            out/arch/arm64/boot/Image.gz*
+
+      # 5. رفع Release إذا تم اختيار خيار Release = true
       - name: Upload release assets
-        if: github.event.inputs.release
+        if: github.event.inputs.release == true
         uses: softprops/action-gh-release@v2.4.2
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body_path: version.txt
           tag_name: "${{ env.RELEASE_TS }}"
-          name: "ParadigmKernel-${{ env.RELEASE_TS }}"
+          name: "ParadigmKernel-ZYDARK-${{ env.RELEASE_TS }}"
           files: |
             boot.img
             dtbo.img
