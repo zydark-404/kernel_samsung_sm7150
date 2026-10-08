@@ -1,4 +1,4 @@
-name: Build paradigm kernel with ZYDARK & KernelSU
+name: Build paradigm kernel with ZYDARK & APatch
 
 on:
   workflow_dispatch:
@@ -40,23 +40,25 @@ jobs:
           rm ../llvm.tar.gz
           cd ..
 
-      # 2. دمج KernelSU v0.9.5 وتخصيص الاسم ZYDARK
-      - name: Inject KernelSU & Custom Configuration
+      # 2. دمج APatch (KernelPatch) وتخصيص الاسم ZYDARK-APatch
+      - name: Inject APatch & Custom Configuration
         run: |
-          # تنزيل ودمج KernelSU v0.9.5
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # سحب وتجهيز سورس APatch (KernelPatch)
+          git clone --depth=1 https://github.com/bmax121/KernelPatch.git kernelpatch
+          if ! grep -q "kernelpatch" Makefile; then
+            echo "obj-y += kernelpatch/" >> Makefile
+          fi
           
-          # البحث عن ملفات defconfig وتعديلها لإضافة ZYDARK وإعدادات الروت
+          # البحث عن ملفات defconfig وتعديلها لإضافة ZYDARK وإعدادات APatch المطلوبة
           find arch/arm64/configs/ -name "*defconfig" | xargs -I {} sh -c '
-            echo "CONFIG_KSU=y" >> {}
             echo "CONFIG_KALLSYMS=y" >> {}
             echo "CONFIG_KALLSYMS_ALL=y" >> {}
             echo "CONFIG_OVERLAY_FS=y" >> {}
             echo "CONFIG_NAMESPACES=y" >> {}
-            echo "CONFIG_LOCALVERSION=\"-ZYDARK-KSU\"" >> {}
+            echo "CONFIG_LOCALVERSION=\"-ZYDARK-APatch\"" >> {}
           '
 
-      # 3. تشغيل سكريبت البناء الخاص بك
+      # 3. تشغيل سكريبت البناء الناجح
       - name: Build kernel
         run: |
           chmod +x build.sh
@@ -67,7 +69,7 @@ jobs:
         run: |
           echo "RELEASE_TS=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
           : > version.txt
-          echo "**Kernel version:** $(cat out/include/config/kernel.release 2>/dev/null || echo 'ZYDARK-KSU')" >> version.txt
+          echo "**Kernel version:** $(cat out/include/config/kernel.release 2>/dev/null || echo 'ZYDARK-APatch')" >> version.txt
           echo >> version.txt
           export KHASH="$(git rev-parse HEAD)"
           echo "**Kernel source:** [$KHASH](https://github.com/${{ github.repository }}/tree/$KHASH)" >> version.txt
@@ -80,11 +82,11 @@ jobs:
             printf "%b\n" "${{ github.event.inputs.changelog }}" >> version.txt
           fi
 
-      # 4. رفع الملفات كـ Artifacts تلقائياً في كل مرة
+      # 4. رفع الملفات كـ Artifacts باسم APatch الجديد
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ParadigmKernel-ZYDARK-KSU
+          name: ParadigmKernel-ZYDARK-APatch
           path: |
             boot.img
             dtbo.img
@@ -99,7 +101,7 @@ jobs:
         with:
           body_path: version.txt
           tag_name: "${{ env.RELEASE_TS }}"
-          name: "ParadigmKernel-ZYDARK-${{ env.RELEASE_TS }}"
+          name: "ParadigmKernel-ZYDARK-APatch-${{ env.RELEASE_TS }}"
           files: |
             boot.img
             dtbo.img
